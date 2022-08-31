@@ -12,6 +12,13 @@ from bot.helper.telegram_helper.bot_commands import BotCommands
 from bot import download_dict, download_dict_lock, STATUS_LIMIT, botStartTime, DOWNLOAD_DIR, dispatcher
 from bot.helper.telegram_helper.button_build import ButtonMaker
 
+import shutil
+import psutil
+from telegram.error import RetryAfter
+from telegram.ext import CallbackQueryHandler
+from telegram.message import Message
+from telegram.update import Update
+from bot import *
 MAGNET_REGEX = r"magnet:\?xt=urn:btih:[a-zA-Z0-9]*"
 
 URL_REGEX = r"(?:(?:https?|ftp):\/\/)?[\w/\-?=%.]+\.[\w/\-?=%.]+"
@@ -184,12 +191,32 @@ def get_readable_message():
         bmsg += f"\n<b>DL:</b> {get_readable_file_size(dlspeed_bytes)}/s | <b>UL:</b> {get_readable_file_size(upspeed_bytes)}/s"
         if STATUS_LIMIT is not None and tasks > STATUS_LIMIT:
             msg += f"<b>Page:</b> {PAGE_NO}/{pages} | <b>Tasks:</b> {tasks}\n"
+            
+            
             buttons = ButtonMaker()
-            buttons.sbutton("Previous", "status pre")
-            buttons.sbutton("Next", "status nex")
-            button = InlineKeyboardMarkup(buttons.build_menu(2))
+        buttons.sbutton("Refresh", "status refresh")
+        buttons.sbutton("Statistics", str(THREE))
+        buttons.sbutton("Close", "status close")
+        sbutton = InlineKeyboardMarkup(buttons.build_menu(3))
+        
+        if STATUS_LIMIT is not None and tasks > STATUS_LIMIT:
+            msg += f"<b>Tasks:</b> {tasks}\n"
+            buttons = ButtonMaker()
+            if EMOJI_THEME is True:
+                buttons.sbutton("⏪Previous", "status pre")
+                buttons.sbutton(f"{PAGE_NO}/{pages}", str(THREE))
+                buttons.sbutton("Next⏩", "status nex")
+                buttons.sbutton("Refresh", "status refresh")
+                buttons.sbutton("Close", "status close")
+            else:
+                buttons.sbutton("Previous", "status pre")
+                buttons.sbutton(f"{PAGE_NO}/{pages}", str(THREE))
+                buttons.sbutton("Next", "status nex")
+                buttons.sbutton("Refresh", "status refresh")
+                buttons.sbutton("Close", "status close")
+            button = InlineKeyboardMarkup(buttons.build_menu(3))
             return msg + bmsg, button
-        return msg + bmsg, ""
+        return msg + bmsg, sbutton
 
 def turn(data):
     try:
@@ -286,4 +313,51 @@ def get_content_type(link: str) -> str:
         except:
             content_type = None
     return content_type
+
+
+ONE, TWO, THREE = range(3)
+def pop_up_stats(update, context):
+    query = update.callback_query
+    stats = bot_sys_stats()
+    query.answer(text=stats, show_alert=True)
+def bot_sys_stats():
+    currentTime = get_readable_time(time() - botStartTime)
+    cpu = psutil.cpu_percent()
+    mem = psutil.virtual_memory().percent
+    disk = psutil.disk_usage(DOWNLOAD_DIR).percent
+    total, used, free = shutil.disk_usage(DOWNLOAD_DIR)
+    total = get_readable_file_size(total)
+    used = get_readable_file_size(used)
+    free = get_readable_file_size(free)
+    recv = get_readable_file_size(psutil.net_io_counters().bytes_recv)
+    sent = get_readable_file_size(psutil.net_io_counters().bytes_sent)
+    num_active = 0
+    num_upload = 0
+    num_split = 0
+    num_extract = 0
+    num_archi = 0
+    tasks = len(download_dict)
+    for stats in list(download_dict.values()):
+       if stats.status() == MirrorStatus.STATUS_DOWNLOADING:
+                num_active += 1
+       if stats.status() == MirrorStatus.STATUS_UPLOADING:
+                num_upload += 1
+       if stats.status() == MirrorStatus.STATUS_ARCHIVING:
+                num_archi += 1
+       if stats.status() == MirrorStatus.STATUS_EXTRACTING:
+                num_extract += 1
+       if stats.status() == MirrorStatus.STATUS_SPLITTING:
+                num_split += 1
+    stats = f"""
+CPU : {cpu}% | RAM : {mem}%
+DL : {num_active} | UP : {num_upload} | SPLIT : {num_split}
+ZIP : {num_archi} | UNZIP : {num_extract} | TOTAL : {tasks}
+Limits : T/D : {TORRENT_DIRECT_LIMIT}GB | Z/U : {ZIP_UNZIP_LIMIT}GB
+                    L : {LEECH_LIMIT}GB | M : {MEGA_LIMIT}GB
+Made with ❤️ by Dhruv
+"""
+    return stats
+dispatcher.add_handler(
+    CallbackQueryHandler(pop_up_stats, pattern="^" + str(THREE) + "$")
+)
 
